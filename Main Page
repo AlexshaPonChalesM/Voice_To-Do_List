@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Voice To-Do List</title>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f7fa;
+        }
+        h1 {
+            color: #2c3e50;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .container {
+            background: white;
+            border-radius: 10px;
+            padding: 25px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .list {
+            margin-bottom: 25px;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 15px;
+        }
+        .list-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .list-name {
+            font-size: 1.3em;
+            font-weight: bold;
+            color: #3498db;
+        }
+        .task {
+            display: flex;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid #eee;
+        }
+        .task:last-child {
+            border-bottom: none;
+        }
+        .task-text {
+            flex-grow: 1;
+            margin-left: 10px;
+        }
+        .completed {
+            text-decoration: line-through;
+            color: #95a5a6;
+        }
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        button {
+            padding: 10px 15px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        #micBtn {
+            background-color: #2ecc71;
+            color: white;
+        }
+        #micBtn.listening {
+            background-color: #e74c3c;
+            animation: pulse 1.5s infinite;
+        }
+        .delete-btn {
+            background-color: #e74c3c;
+            color: white;
+        }
+        .complete-btn {
+            background-color: #2ecc71;
+            color: white;
+        }
+        .status {
+            margin: 15px 0;
+            padding: 10px;
+            border-radius: 5px;
+            text-align: center;
+        }
+        .voice-status {
+            background-color: #3498db;
+            color: white;
+        }
+        .error-status {
+            background-color: #e74c3c;
+            color: white;
+        }
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.7; }
+            100% { opacity: 1; }
+        }
+        .instructions {
+            margin-top: 30px;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Smart Voice To-Do List</h1>
+        
+        <div id="listsContainer"></div>
+        
+        <div class="controls">
+            <button id="micBtn">🎤 Press 'N' to Speak</button>
+        </div>
+        
+        <div id="statusMessage" class="status voice-status" style="display: none;"></div>
+        
+        <div class="instructions">
+            <h3>Voice Commands:</h3>
+            <ul>
+                <li>"Create list [name]" - Create a new list</li>
+                <li>"Add [task] to [list]" - Add task to specific list</li>
+                <li>"Complete [task] in [list]" - Mark task as complete</li>
+                <li>"Remove [task] from [list]" - Delete a task</li>
+                <li>"Delete list [name]" - Remove entire list</li>
+                <li>"Show lists" - List all available lists</li>
+                <li>"Show tasks in [list]" - List incomplete tasks</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        // Speech Recognition Setup
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        const recognition = new SpeechRecognition();
+        recognition.continuous = false;
+        recognition.interimResults = false;
+        recognition.maxAlternatives = 1;
+
+        // DOM Elements
+        const micBtn = document.getElementById('micBtn');
+        const listsContainer = document.getElementById('listsContainer');
+        const statusMessage = document.getElementById('statusMessage');
+
+        // Data Structure
+        let todoLists = JSON.parse(localStorage.getItem('todoLists')) || {};
+        let currentActiveList = Object.keys(todoLists)[0] || null;
+        let isTyping = false;
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            speak("Welcome to Smart To-Do List. Press N key to speak commands.");
+            renderLists();
+        });
+
+        // Speech Synthesis
+        const speak = (text) => {
+            const utterance = new SpeechSynthesisUtterance(text);
+            window.speechSynthesis.speak(utterance);
+        };
+
+        // Show Status Message
+        const showStatus = (message, isError = false) => {
+            statusMessage.textContent = message;
+            statusMessage.className = isError ? 'status error-status' : 'status voice-status';
+            statusMessage.style.display = 'block';
+            speak(message);
+            setTimeout(() => {
+                statusMessage.style.display = 'none';
+            }, 3000);
+        };
+
+        // Render Lists
+        const renderLists = () => {
+            listsContainer.innerHTML = '';
+            
+            if (Object.keys(todoLists).length === 0) {
+                listsContainer.innerHTML = '<p>No lists created yet. Say "Create list [name]" to start.</p>';
+                return;
+            }
+            
+            for (const listName in todoLists) {
+                const listDiv = document.createElement('div');
+                listDiv.className = 'list';
+                
+                const listHeader = document.createElement('div');
+                listHeader.className = 'list-header';
+                
+                const nameElement = document.createElement('div');
+                nameElement.className = 'list-name';
+                nameElement.textContent = listName;
+                
+                const deleteBtn = document.createElement('button');
+                deleteBtn.className = 'delete-btn';
+                deleteBtn.textContent = 'Delete List';
+                deleteBtn.addEventListener('click', () => deleteList(listName));
+                
+                listHeader.appendChild(nameElement);
+                listHeader.appendChild(deleteBtn);
+                listDiv.appendChild(listHeader);
+                
+                if (todoLists[listName].length === 0) {
+                    const emptyMsg = document.createElement('p');
+                    emptyMsg.textContent = 'No tasks in this list';
+                    listDiv.appendChild(emptyMsg);
+                } else {
+                    todoLists[listName].forEach((task, index) => {
+                        const taskElement = document.createElement('div');
+                        taskElement.className = `task ${task.completed ? 'completed' : ''}`;
+                        
+                        const completeBtn = document.createElement('button');
+                        completeBtn.className = 'complete-btn';
+                        completeBtn.textContent = task.completed ? '✓' : 'Complete';
+                        completeBtn.addEventListener('click', () => toggleTask(listName, index));
+                        
+                        const taskText = document.createElement('span');
+                        taskText.className = 'task-text';
+                        taskText.textContent = task.text;
+                        
+                        const removeBtn = document.createElement('button');
+                        removeBtn.className = 'delete-btn';
+                        removeBtn.textContent = 'Remove';
+                        removeBtn.addEventListener('click', () => removeTask(listName, index));
+                        
+                        taskElement.appendChild(completeBtn);
+                        taskElement.appendChild(taskText);
+                        taskElement.appendChild(removeBtn);
+                        listDiv.appendChild(taskElement);
+                    });
+                }
+                
+                listsContainer.appendChild(listDiv);
+            }
+            
+            localStorage.setItem('todoLists', JSON.stringify(todoLists));
+        };
+
+        // Task Operations
+        const addTask = (listName, taskText) => {
+            if (!todoLists[listName]) {
+                showStatus(`List "${listName}" doesn't exist. Say "Create list ${listName}" first.`, true);
+                return false;
+            }
+            
+            todoLists[listName].push({ text: taskText, completed: false });
+            showStatus(`Added "${taskText}" to list "${listName}"`);
+            renderLists();
+            return true;
+        };
+
+        const toggleTask = (listName, taskIndex) => {
+            todoLists[listName][taskIndex].completed = !todoLists[listName][taskIndex].completed;
+            const status = todoLists[listName][taskIndex].completed ? 'completed' : 'pending';
+            showStatus(`Marked "${todoLists[listName][taskIndex].text}" as ${status}`);
+            
+            // Check if all tasks are completed
+            if (todoLists[listName].every(task => task.completed)) {
+                setTimeout(() => {
+                    deleteList(listName);
+                    showStatus(`List "${listName}" was automatically deleted as all tasks were completed`);
+                }, 2000);
+            } else {
+                renderLists();
+            }
+        };
+
+        const removeTask = (listName, taskIndex) => {
+            const taskText = todoLists[listName][taskIndex].text;
+            todoLists[listName].splice(taskIndex, 1);
+            showStatus(`Removed "${taskText}" from list "${listName}"`);
+            
+            // Delete list if empty
+            if (todoLists[listName].length === 0) {
+                deleteList(listName);
+            } else {
+                renderLists();
+            }
+        };
+
+        const createList = (listName) => {
+            if (!todoLists[listName]) {
+                todoLists[listName] = [];
+                currentActiveList = listName;
+                showStatus(`Created new list "${listName}"`);
+                renderLists();
+                return true;
+            } else {
+                showStatus(`List "${listName}" already exists`, true);
+                return false;
+            }
+        };
+
+        const deleteList = (listName) => {
+            if (todoLists[listName]) {
+                delete todoLists[listName];
+                showStatus(`Deleted list "${listName}"`);
+                
+                // Update current active list
+                const remainingLists = Object.keys(todoLists);
+                currentActiveList = remainingLists.length > 0 ? remainingLists[0] : null;
+                renderLists();
+                return true;
+            }
+            showStatus(`List "${listName}" doesn't exist`, true);
+            return false;
+        };
+
+        const listAllLists = () => {
+            const lists = Object.keys(todoLists);
+            if (lists.length === 0) {
+                showStatus("There are no lists yet. Say 'Create list [name]' to start.");
+            } else {
+                showStatus(`Available lists: ${lists.join(', ')}`);
+            }
+        };
+
+        const listPendingTasks = (listName) => {
+            if (!todoLists[listName]) {
+                showStatus(`List "${listName}" doesn't exist`, true);
+                return;
+            }
+            
+            const pendingTasks = todoLists[listName]
+                .filter(task => !task.completed)
+                .map(task => task.text);
+            
+            if (pendingTasks.length === 0) {
+                showStatus(`No pending tasks in list "${listName}"`);
+            } else {
+                showStatus(`Pending tasks in "${listName}": ${pendingTasks.join(', ')}`);
+            }
+        };
+
+        // Voice Command Processing
+        const processVoiceCommand = (transcript) => {
+            const lowerText = transcript.toLowerCase();
+            
+            // Create list
+            if (lowerText.startsWith('create list ')) {
+                const listName = transcript.substring(12).trim();
+                createList(listName);
+            }
+            // Add task to list
+            else if (lowerText.includes(' add ') && lowerText.includes(' to ')) {
+                const parts = transcript.split(' to ');
+                const taskText = parts[0].replace('add', '').trim();
+                const listName = parts[1].trim();
+                addTask(listName, taskText);
+            }
+            // Complete task
+            else if (lowerText.includes('complete ') && lowerText.includes(' in ')) {
+                const parts = transcript.split(' in ');
+                const taskText = parts[0].replace('complete', '').trim();
+                const listName = parts[1].trim();
+                
+                if (todoLists[listName]) {
+                    const taskIndex = todoLists[listName].findIndex(
+                        task => task.text.toLowerCase().includes(taskText.toLowerCase())
+                    );
+                    if (taskIndex !== -1) {
+                        toggleTask(listName, taskIndex);
+                    } else {
+                        showStatus(`Task "${taskText}" not found in list "${listName}"`, true);
+                    }
+                }
+            }
+            // Remove task
+            else if (lowerText.includes('remove ') && lowerText.includes(' from ')) {
+                const parts = transcript.split(' from ');
+                const taskText = parts[0].replace('remove', '').trim();
+                const listName = parts[1].trim();
+                
+                if (todoLists[listName]) {
+                    const taskIndex = todoLists[listName].findIndex(
+                        task => task.text.toLowerCase().includes(taskText.toLowerCase())
+                    );
+                    if (taskIndex !== -1) {
+                        removeTask(listName, taskIndex);
+                    } else {
+                        showStatus(`Task "${taskText}" not found in list "${listName}"`, true);
+                    }
+                }
+            }
+            // Delete list
+            else if (lowerText.startsWith('delete list ')) {
+                const listName = transcript.substring(12).trim();
+                deleteList(listName);
+            }
+            // Show lists
+            else if (lowerText === 'show lists') {
+                listAllLists();
+            }
+            // Show tasks in list
+            else if (lowerText.startsWith('show tasks in ')) {
+                const listName = transcript.substring(14).trim();
+                listPendingTasks(listName);
+            }
+            // Add to current list (if exists)
+            else if (lowerText.startsWith('add ') && currentActiveList) {
+                const taskText = transcript.substring(4).trim();
+                addTask(currentActiveList, taskText);
+            }
+            // Add without list specified
+            else if (lowerText.startsWith('add ')) {
+                showStatus("Please create a list first. Say 'Create list [name]'", true);
+            }
+            else {
+                showStatus("Sorry, I didn't understand that command. Try something like 'Add milk to groceries'", true);
+            }
+        };
+
+        // Keyboard Handling
+        document.addEventListener('keydown', (e) => {
+            // Activate mic only when 'n' is pressed alone (not during typing)
+            if (e.key.toLowerCase() === 'n' && !isTyping && !micBtn.classList.contains('listening')) {
+                recognition.start();
+                micBtn.classList.add('listening');
+                showStatus("Listening...");
+            }
+        });
+
+        // Track typing state
+        document.addEventListener('keydown', (e) => {
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+                isTyping = true;
+            }
+        });
+
+        document.addEventListener('keyup', (e) => {
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+                isTyping = false;
+            }
+        });
+
+        // Mic Button
+        micBtn.addEventListener('click', () => {
+            recognition.start();
+            micBtn.classList.add('listening');
+            showStatus("Listening...");
+        });
+
+        // Speech Recognition Events
+        recognition.onresult = (event) => {
+            const transcript = event.results[0][0].transcript;
+            micBtn.classList.remove('listening');
+            processVoiceCommand(transcript);
+        };
+
+        recognition.onerror = (event) => {
+            micBtn.classList.remove('listening');
+            showStatus("Error: " + event.error, true);
+        };
+
+        recognition.onend = () => {
+            micBtn.classList.remove('listening');
+        };
+    </script>
+</body>
+</html>
